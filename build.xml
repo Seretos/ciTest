@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="ciTest" default="build">
+    <property name="buildFile" value="ciTest"/>
+    <property name="phpBin" value="php"/>
+    <property name="buildDir" value="${basedir}/build"/>
+    <property name="vendorDir" value="${basedir}/vendor"/>
+    <property name="logDir" value="${buildDir}/logs"/>
+    <property name="testDir" value="${buildDir}/Tests"/>
+    <property name="coverageDir" value="${buildDir}/coverage"/>
+    <property name="dependDir" value="${buildDir}/pdepend"/>
+    <property name="phpunitXml" value="${basedir}/phpunit.xml.dist"/>
+    <property name="bootstrap" value="app/autoload.php"/>
+    <property name="composerUrl" value="http://getcomposer.org/composer.phar"/>
+    <property name="phpunitUrl" value="https://phar.phpunit.de/phpunit.phar"/>
+    <property name="phplocUrl" value="https://phar.phpunit.de/phploc.phar"/>
+    <property name="phpmdUrl" value="http://static.phpmd.org/php/latest/phpmd.phar"/>
+    <property name="phpcdUrl" value="https://phar.phpunit.de/phpcpd.phar"/>
+    <property name="phpdoxUrl" value="http://phpdox.de/releases/phpdox.phar"/>
+
+    <taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+    <target name="build" depends="check-phpunit-failure" description="execute tests and build the tar.gz file">
+        <mkdir dir="${buildDir}"/>
+
+        <exec executable="${phpBin}">
+            <arg value="bin/console"/>
+            <arg value="cache:clear"/>
+            <arg value="--env=prod"/>
+            <arg value="--no-debug"/>
+        </exec>
+
+        <tar destfile="${buildDir}/${buildFile}.tar.gz" compression="gzip"
+             basedir="${basedir}"
+             excludes="build/**, build.xml, Tests/**,.gitignore,*.phar,*.xml.dist,*.md, phpdox.xml"/>
+    </target>
+
+    <target name="test" depends="check-phpunit-failure" description="execute tests">
+    </target>
+
+    <target name="statistics" depends="check-phpunit-failure-ci,pdepend,phpdox"
+            description="generate test and source statistics (require xDebug)">
+    </target>
+
+    <target name="clean" unless="clean.done" description="Cleanup build artifacts">
+        <delete dir="${buildDir}"/>
+        <delete dir="${vendorDir}"/>
+        <delete file="composer.phar"/>
+        <delete file="composer.lock"/>
+        <delete file="phpcpd.phar"/>
+        <delete file="phpdox.phar"/>
+        <delete file="phploc.phar"/>
+        <delete file="phpmd.phar"/>
+        <delete file="phpunit.phar"/>
+        <property name="clean.done" value="true"/>
+    </target>
+
+    <target name="prepare" unless="prepare.done">
+        <get src="${composerUrl}" dest="composer.phar" verbose="true" usetimestamp="true"/>
+
+        <if>
+            <available file="composer.lock"/>
+            <then>
+                <exec executable="${phpBin}">
+                    <arg value="composer.phar"/>
+                    <arg value="install"/>
+                    <arg value="--no-dev"/>
+                </exec>
+            </then>
+            <else>
+                <exec executable="${phpBin}">
+                    <arg value="composer.phar"/>
+                    <arg value="update"/>
+                    <arg value="--no-dev"/>
+                </exec>
+            </else>
+        </if>
+
+        <property name="prepare.done" value="true"/>
+    </target>
+
+    <target name="prepare-ci" depends="prepare">
+        <mkdir dir="${buildDir}"/>
+        <mkdir dir="${logDir}"/>
+        <mkdir dir="${dependDir}"/>
+
+        <exec executable="${phpBin}">
+            <arg value="composer.phar"/>
+            <arg value="update"/>
+        </exec>
+
+        <get src="${phplocUrl}" dest="phploc.phar" verbose="true" usetimestamp="true"/>
+        <get src="${phpmdUrl}" dest="phpmd.phar" verbose="true" usetimestamp="true"/>
+        <get src="${phpcdUrl}" dest="phpcpd.phar" verbose="true" usetimestamp="true"/>
+        <get src="${phpdoxUrl}" dest="phpdox.phar" verbose="true" usetimestamp="true"/>
+    </target>
+
+    <target name="phpunit" depends="prepare">
+        <exec executable="${phpBin}">
+            <arg value="composer.phar"/>
+            <arg value="update"/>
+        </exec>
+
+        <exec executable="vendor/bin/simple-phpunit" resultproperty="result.phpunit">
+            <arg value="--configuration"/>
+            <arg path="${phpunitXml}"/>
+            <arg value="--bootstrap"/>
+            <arg path="${bootstrap}"/>
+        </exec>
+
+        <property name="phpunit.done" value="true"/>
+    </target>
+
+    <target name="phpunit-ci" depends="prepare-ci">
+        <exec executable="vendor/bin/simple-phpunit" resultproperty="result.phpunit">
+            <arg value="--configuration"/>
+            <arg path="${phpunitXml}"/>
+            <arg value="--bootstrap"/>
+            <arg path="${bootstrap}"/>
+            <arg value="--coverage-clover"/>
+            <arg path="${logDir}/clover.xml"/>
+            <arg value="--coverage-html"/>
+            <arg path="${coverageDir}"/>
+        </exec>
+
+        <property name="phpunit.done" value="true"/>
+    </target>
+
+    <target name="check-phpunit-failure" depends="phpunit">
+        <fail message="PHPUnit did not finish successfully">
+            <condition>
+                <not>
+                    <equals arg1="${result.phpunit}" arg2="0"/>
+                </not>
+            </condition>
+        </fail>
+    </target>
+
+    <target name="check-phpunit-failure-ci" depends="phpunit-ci">
+        <fail message="PHPUnit did not finish successfully">
+            <condition>
+                <not>
+                    <equals arg1="${result.phpunit}" arg2="0"/>
+                </not>
+            </condition>
+        </fail>
+    </target>
+
+    <target name="phploc" depends="prepare-ci">
+        <exec executable="${phpBin}" taskname="phploc">
+            <arg value="phploc.phar"/>
+            <arg value="--exclude"/>
+            <arg value="vendor"/>
+            <arg value="Tests"/>
+            <arg value="build"/>
+            <arg value="--count-tests"/>
+            <arg value="--log-csv"/>
+            <arg value="${logDir}/phploc.csv"/>
+            <arg value="--log-xml"/>
+            <arg value="${logDir}/phploc.xml"/>
+            <arg path="${basedir}"/>
+        </exec>
+
+        <property name="phploc.done" value="true"/>
+    </target>
+
+    <target name="phpdox" unless="phpdox.done" depends="phploc">
+        <exec executable="${phpBin}" taskname="phpdox">
+            <arg value="phpdox.phar"/>
+        </exec>
+        <property name="phpdox.done" value="true"/>
+    </target>
+
+    <target name="pdepend"
+            unless="pdepend.done"
+            depends="prepare-ci">
+        <exec executable="${phpBin}">
+            <arg value="composer.phar"/>
+            <arg value="require"/>
+            <arg value="pdepend/pdepend"/>
+            <arg value="--dev"/>
+        </exec>
+
+        <exec executable="vendor/bin/pdepend" taskname="pdepend">
+            <arg value="--summary-xml=${logDir}/jdepend.xml"/>
+            <arg value="--jdepend-chart=${dependDir}/dependencies.svg"/>
+            <arg value="--overview-pyramid=${dependDir}/overview-pyramid.svg"/>
+            <arg value="--ignore=${buildDir},${vendorDir},${testDir}"/>
+            <arg path="${basedir}"/>
+        </exec>
+
+        <exec executable="${phpBin}">
+            <arg value="composer.phar"/>
+            <arg value="remove"/>
+            <arg value="pdepend/pdepend"/>
+            <arg value="--dev"/>
+        </exec>
+
+        <property name="pdepend.done" value="true"/>
+    </target>
+</project>
